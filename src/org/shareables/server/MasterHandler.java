@@ -15,9 +15,10 @@ import javax.script.ScriptEngine;
 import javax.script.ScriptEngineManager;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.UUID;
 
 import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.CONTENT_TYPE;
 import static org.jboss.netty.handler.codec.http.HttpHeaders.isKeepAlive;
@@ -75,7 +76,7 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
         final String path = queryStringDecoder.getPath();
 
         log.info("Request for: " + path);
-        log.info("Request: " + request.getContent().toString(CharsetUtil.UTF_8));
+        log.finer("Request: " + request.getContent().toString(CharsetUtil.UTF_8));
         request.getContent().readerIndex(0);
 
         responder.setKeepAlive(isKeepAlive(request));
@@ -83,25 +84,43 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
         String[] components = path.split("/");
         
         if (components[1].equals("new") && request.getMethod().equals(HttpMethod.POST)) {
-        	// /new/$model[/$lang]
-        	String model = components[2];
-        	String lang = (components.length > 3)?components[3]:model;
-            String key = UUID.randomUUID().toString();
+        	// /new/$model/$lang
+            if(components.length >= 4){
+                String model = components[2];
+                String lang = components[3];
 
-            byte[] data = request.getContent().toByteBuffer().array();
+                byte[] data = request.getContent().toByteBuffer().array();
 
-            log.info("model: "+model+", lang: "+lang+", key: "+key);
-        	// create new object with the following id model and language
-            Jedis jedi = pool.getResource();
-            try{
-                Pipeline pipe = jedi.pipelined();
-                pipe.rpush(key, model);
-                pipe.rpush(key, lang);
-                pipe.rpush(key.getBytes(CharsetUtil.US_ASCII), data);
-                pipe.sync();
-            } finally {
-                pool.returnResource(jedi);
+                String mimetype = request.getHeader("Content-Type");
+                // Add language execution here
+
+                String key = model+":"+UUID.randomUUID().toString();
+                log.info("model: " + model + ", lang: " + lang + ", key: " + key);
+
+                // create new object with the following id model and language
+                Jedis jedi = pool.getResource();
+                try {
+                    Pipeline pipe = jedi.pipelined();
+                    pipe.hset(key, "model", model);
+                    pipe.hset(key, "lang", lang);
+                    if ("mimeblob".equals(model)) {
+                        pipe.hset(key, "mime-type", mimetype);
+                    }
+                    pipe.hset(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII), data);
+                    pipe.sync();
+                } finally {
+                    pool.returnResource(jedi);
+                }
+
+                // Write a response
+                responder.writeString(key, "application/x-shareable-key", HttpResponseStatus.OK);
+            } else {
+                responder.writeErrorMessage("EBADNEW", "New neeeds to be /new/$model/$lang","", HttpResponseStatus.BAD_REQUEST);
             }
+
+
+
+
         }
         else if(components[1].equals("update")){
         	// /update/$id
@@ -111,16 +130,27 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
         else if(components[1].equals("get")){
         	// /get/$id
             Jedis jedi = pool.getResource();
-            String id = components[2];
-            String objScript;
+            String key = components[2];
+            String contentType;
+            String model;
+            String lang;
+            byte[] value;
 	        try {
-	        	objScript = jedi.lindex(id, 2); // get js from db with this id
+                List<String> meta = jedi.hmget(key, "model", "lang", "mime-type");
+                model = meta.get(0);
+                lang = meta.get(1);
+                if("mimeblob".equals(model)){
+                    contentType = meta.get(2);
+                } else {
+                    contentType = "application/json";
+                }
+	        	value = jedi.hget(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII)); // get js from db with this id
 	        } finally {
                 pool.returnResource(jedi);
             }
             /*Object json = js.eval(objScript);
             responder.writeJSON(json, HttpResponseStatus.OK);*/
-            responder.writeByteArray(objScript.getBytes(), HttpResponseStatus.OK);
+            responder.writeByteArray(value, contentType, HttpResponseStatus.OK);
         }
         else {
             // Unknown request, close connection

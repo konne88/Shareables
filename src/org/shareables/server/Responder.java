@@ -18,6 +18,7 @@ import org.jboss.netty.channel.ChannelFutureListener;
 import org.jboss.netty.handler.codec.http.DefaultHttpResponse;
 import org.jboss.netty.handler.codec.http.HttpResponse;
 import org.jboss.netty.handler.codec.http.HttpResponseStatus;
+import org.jboss.netty.util.CharsetUtil;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -193,14 +194,13 @@ public class Responder {
     }
 
     /**
-     * Writes a given byte array onto the wire. The given byte array should be a json object,
-     * because this method will write &quot;application/json&quot; as content type into the
-     * response header. If the byte array is null this method will sent an empty response content.
+     * Writes a given byte array onto the wire.
+     * If the byte array is null this method will sent an empty response content.
      * @param byteArray A json object as byte array
      * @param status HttpResponseStatus
      * @throws IOException Thrown if writing onto the output fails
      */
-    public void writeByteArray(byte[] byteArray, HttpResponseStatus status) throws IOException {
+    public void writeByteArray(byte[] byteArray, String contentType,HttpResponseStatus status) throws IOException {
         // Allocate buffer if not already done
         // do this here because we are in a worker thread
         if (outputBuffer == null) {
@@ -211,7 +211,7 @@ public class Responder {
         HttpResponse response = new DefaultHttpResponse(HTTP_1_1, status);
 
         response.setHeader("Access-Control-Allow-Origin", "*");
-        response.setHeader(CONTENT_TYPE, "application/json; charset=UTF-8");
+        response.setHeader(CONTENT_TYPE, contentType);
         outputBuffer.clear();
 
         if (byteArray != null) {
@@ -236,6 +236,54 @@ public class Responder {
             future.addListener(ChannelFutureListener.CLOSE);
         }
     }
+
+        /**
+         * Writes a given String onto the wire as UTF-8
+        *using the specified content-type
+        *@param byteArray A json object as byte array
+        *@param status HttpResponseStatus
+        *@param contentType the content-type to use
+        *@throws IOException Thrown if writing onto the output fails
+        * */
+        public void writeString (String data, String contentType, HttpResponseStatus status)throws IOException
+        {
+            // Allocate buffer if not already done
+            // do this here because we are in a worker thread
+            if (outputBuffer == null) {
+                outputBuffer = ChannelBuffers.dynamicBuffer(4096);
+            }
+
+            // Build the response object.
+            HttpResponse response = new DefaultHttpResponse(HTTP_1_1, status);
+
+            response.setHeader("Access-Control-Allow-Origin", "*");
+            response.setHeader(CONTENT_TYPE, contentType);
+            outputBuffer.clear();
+
+            if (data != null) {
+                OutputStream resultStream = new ChannelBufferOutputStream(outputBuffer);
+                resultStream.write(data.getBytes(CharsetUtil.UTF_8));
+                resultStream.flush();
+            }
+
+            response.setContent(outputBuffer);
+
+            if (keepAlive) {
+                // Add 'Content-Length' header only for a keep-alive connection.
+                response.setHeader(CONTENT_LENGTH, response.getContent().readableBytes());
+            }
+
+            // Write the response.
+            ChannelFuture future = replyChannel.write(response);
+
+            // Close the non-keep-alive connection after the write operation is
+            // done.
+            if (!keepAlive) {
+                future.addListener(ChannelFutureListener.CLOSE);
+            }
+
+
+        }
 
 
 

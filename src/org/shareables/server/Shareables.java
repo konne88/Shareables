@@ -3,7 +3,7 @@
  */
 package org.shareables.server;
 
-import org.shareables.server.HttpServer;
+import redis.clients.jedis.JedisPool;
 
 import java.util.logging.Logger;
 
@@ -17,6 +17,7 @@ public class Shareables {
      * handler and creates the httpserver
      */
     public static void main(String[] args) {
-        new HttpServer();
+        JedisPool pool = new JedisPool("localhost", 6379);
+        new HttpServer(pool);
     }
 }

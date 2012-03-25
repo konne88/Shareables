@@ -7,14 +7,17 @@ package org.shareables.server;
 import org.jboss.netty.channel.*;
 import org.jboss.netty.handler.codec.http.*;
 import org.jboss.netty.util.CharsetUtil;
+import redis.clients.jedis.Jedis;
+import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.Pipeline;
 
+import javax.script.ScriptEngine;
+import javax.script.ScriptEngineManager;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
-import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
+import java.util.UUID;
 
 import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.CONTENT_TYPE;
 import static org.jboss.netty.handler.codec.http.HttpHeaders.isKeepAlive;
@@ -36,11 +39,14 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
     private Responder responder;
     private ScriptEngineManager manager;
     private ScriptEngine js;
-
+    private JedisPool pool;
     /**
      * Constructs a new RequestHandler
+     * @param pool
      */
-    public MasterHandler() {}
+    public MasterHandler(JedisPool pool) {
+        this.pool = pool;
+    }
 
     @Override
     public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
@@ -70,33 +76,51 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
 
         log.info("Request for: " + path);
         log.info("Request: " + request.getContent().toString(CharsetUtil.UTF_8));
-        request.getContent().resetReaderIndex();
+        request.getContent().readerIndex(0);
 
         responder.setKeepAlive(isKeepAlive(request));
 
         String[] components = path.split("/");
         
-        if (components[0].equals("new")) {
+        if (components[1].equals("new") && request.getMethod().equals(HttpMethod.POST)) {
         	// /new/$model[/$lang]
-        	String model = components[1];
-        	String lang = (components.length > 2)?components[2]:model;
+        	String model = components[2];
+        	String lang = (components.length > 3)?components[3]:model;
+            String key = UUID.randomUUID().toString();
+
+            byte[] data = request.getContent().toByteBuffer().array();
+
+            log.info("model: "+model+", lang: "+lang+", key: "+key);
         	// create new object with the following id model and language
+            Jedis jedi = pool.getResource();
+            try{
+                Pipeline pipe = jedi.pipelined();
+                pipe.rpush(key, model);
+                pipe.rpush(key, lang);
+                pipe.rpush(key.getBytes(CharsetUtil.US_ASCII), data);
+                pipe.sync();
+            } finally {
+                pool.returnResource(jedi);
+            }
         }
-        else if(components[0].equals("update")){
+        else if(components[1].equals("update")){
         	// /update/$id
-        	String id = components[1];
+        	String id = components[2];
         	// store script in object with this id
         } 
-        else if(components[0].equals("get")){
+        else if(components[1].equals("get")){
         	// /get/$id
+            Jedis jedi = pool.getResource();
+            String id = components[2];
+            String objScript;
 	        try {
-	        	String id = components[1];
-	        	String objScript = id; // get js from db with this id
-	        	Object json = js.eval(objScript);
-	        	responder.writeJSON(json, HttpResponseStatus.OK);
-	        } catch (Exception er) {
-	        	System.out.println("Your beloved object could not be genrated "+er);
-	        }
+	        	objScript = jedi.lindex(id, 2); // get js from db with this id
+	        } finally {
+                pool.returnResource(jedi);
+            }
+            /*Object json = js.eval(objScript);
+            responder.writeJSON(json, HttpResponseStatus.OK);*/
+            responder.writeByteArray(objScript.getBytes(), HttpResponseStatus.OK);
         }
         else {
             // Unknown request, close connection

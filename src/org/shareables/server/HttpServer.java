@@ -5,6 +5,7 @@ package org.shareables.server;
 
 import org.jboss.netty.bootstrap.ServerBootstrap;
 import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
+import redis.clients.jedis.JedisPool;
 
 import java.net.InetSocketAddress;
 import java.util.concurrent.Executors;
@@ -25,8 +26,8 @@ import java.util.concurrent.Executors;
  */
 public class HttpServer {
 
-	public HttpServer() {
-		// Configure the server.
+    public HttpServer(JedisPool pool) {
+        // Configure the server.
 
 		ServerBootstrap bootstrap = new ServerBootstrap(
 				new NioServerSocketChannelFactory( // Change to Oio* if you want
@@ -35,7 +36,7 @@ public class HttpServer {
 								.newCachedThreadPool()));
 
 			// Set up the event pipeline factory without ssl
-			bootstrap.setPipelineFactory(new ServerPipelineFactory());
+			bootstrap.setPipelineFactory(new ServerPipelineFactory(pool));
 			// Bind and start to accept incoming connections.
 			bootstrap.bind(new InetSocketAddress(8080));
 	}

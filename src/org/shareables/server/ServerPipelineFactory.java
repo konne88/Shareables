@@ -9,6 +9,7 @@ import org.jboss.netty.handler.codec.http.HttpChunkAggregator;
 import org.jboss.netty.handler.codec.http.HttpContentCompressor;
 import org.jboss.netty.handler.codec.http.HttpRequestDecoder;
 import org.jboss.netty.handler.codec.http.HttpResponseEncoder;
+import redis.clients.jedis.JedisPool;
 
 import static org.jboss.netty.channel.Channels.pipeline;
 
@@ -24,8 +25,11 @@ import static org.jboss.netty.channel.Channels.pipeline;
  */
 public class ServerPipelineFactory implements ChannelPipelineFactory {
 
+    private final JedisPool pool;
 
-    public ServerPipelineFactory() {}
+    public ServerPipelineFactory(JedisPool pool) {
+        this.pool = pool;
+    }
 
     @Override
     public ChannelPipeline getPipeline() throws Exception {
@@ -48,7 +52,7 @@ public class ServerPipelineFactory implements ChannelPipelineFactory {
         // We could add compression support by uncommenting the following line
         pipeline.addLast("deflater", new HttpContentCompressor());
 
-        pipeline.addLast("handler", new MasterHandler());
+        pipeline.addLast("handler", new MasterHandler(pool));
         return pipeline;
     }
 }

@@ -13,6 +13,9 @@ import java.util.ArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import javax.script.ScriptEngine;
+import javax.script.ScriptEngineManager;
+
 import static org.jboss.netty.handler.codec.http.HttpHeaders.Names.CONTENT_TYPE;
 import static org.jboss.netty.handler.codec.http.HttpHeaders.isKeepAlive;
 import static org.jboss.netty.handler.codec.http.HttpResponseStatus.FORBIDDEN;
@@ -29,29 +32,28 @@ import static org.jboss.netty.handler.codec.http.HttpVersion.HTTP_1_1;
  *          /org/jboss/netty/example/http/snoop/package-summary.html
  */
 public class MasterHandler extends SimpleChannelUpstreamHandler {
-
     private static Logger log = Logger.getLogger("org.shareable.server");
-
     private Responder responder;
+    private ScriptEngineManager manager;
+    private ScriptEngine js;
 
     /**
      * Constructs a new RequestHandler
      */
     public MasterHandler() {}
 
-
     @Override
     public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
         responder = new Responder(e.getChannel());
+	    manager = new ScriptEngineManager();
+	    js = manager.getEngineByExtension("js");
     }
-
 
     /**
      * Called when a message is received
      */
     @Override
     public void messageReceived(final ChannelHandlerContext ctx, final MessageEvent e) throws Exception {
-
         final HttpRequest request = (HttpRequest) e.getMessage();
         final Channel channel = e.getChannel();
         // System.out.print(request.toString());
@@ -72,9 +74,31 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
 
         responder.setKeepAlive(isKeepAlive(request));
 
-        if ("/new".equals(path)) {
-
-        } else {
+        String[] components = path.split("/");
+        
+        if (components[0].equals("new")) {
+        	// /new/$model[/$lang]
+        	String model = components[1];
+        	String lang = (components.length > 2)?components[2]:model;
+        	// create new object with the following id model and language
+        }
+        else if(components[0].equals("update")){
+        	// /update/$id
+        	String id = components[1];
+        	// store script in object with this id
+        } 
+        else if(components[0].equals("get")){
+        	// /get/$id
+	        try {
+	        	String id = components[1];
+	        	String objScript = id; // get js from db with this id
+	        	Object json = js.eval(objScript);
+	        	responder.writeJSON(json, HttpResponseStatus.OK);
+	        } catch (Exception er) {
+	        	System.out.println("Your beloved object could not be genrated "+er);
+	        }
+        }
+        else {
             // Unknown request, close connection
             log.warning("An unknown URL was requested: " + path);
             responder.writeErrorMessage("EUNKNOWNURL", "An unknown URL was requested", "unknown URL: " + path, HttpResponseStatus.NOT_FOUND);
@@ -118,9 +142,7 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
         if (!keepAlive) {
             future.addListener(ChannelFutureListener.CLOSE);
         }
-
     }
-
 
     /**
      * Called when an uncaught exception occurs

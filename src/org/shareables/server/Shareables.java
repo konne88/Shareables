@@ -19,5 +19,4 @@ public class Shareables {
     public static void main(String[] args) {
         new HttpServer();
     }
-
 }

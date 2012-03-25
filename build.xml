@@ -1,0 +1,112 @@
+<?xml version="1.0" ?>
+<project name="shareables" basedir="." default="main">
+	<property name="bin.dir" value="bin"/>
+	<property name="src.dir" value="src"/>
+	<property name="lib.dir" value="lib"/>
+	<property name="jar.dir" value="jar"/>
+	<property name="jar.temp.dir" value="${jar.dir}/temp"/>
+	<property name="junit-src.dir" value="junit-tests"/>
+	<property name="junit-reports.dir" value="junit-reports"/>
+	<property name="junit-lib.dir" value="junit-lib"/>
+	<property name="junit-bin.dir" value="junit-bin"/>
+	<property name="junit-bin.temp.dir" value="${junit-bin.dir}/temp"/>
+	<property name="main-class" value="org.shareables.server.Shareables"/>
+	<property name="classpath" value="."/>
+	
+	<target name="clean">
+		<delete dir="${bin.dir}"/>
+		<delete dir="${jar.dir}"/>
+		<delete dir="${junit-bin.dir}"/>
+	</target>
+
+	<target name="compile">
+		<mkdir dir="${bin.dir}"/>
+		<javac target="1.6" source="1.6" srcdir="${src.dir}" destdir="${bin.dir}" 
+			 includeantruntime="false" debug="true" debuglevel="lines,vars,source">
+			<compilerarg value="-Xlint"/>
+			<classpath>
+				<pathelement path="${classpath}"/>
+				<fileset dir="${lib.dir}">
+					<include name="**/*.jar"/>
+				</fileset>
+				<pathelement location="${bin.dir}"/>
+			</classpath>
+		</javac>
+	</target>
+
+    <target name="jar" depends="compile">
+    	<delete dir="${jar.temp.dir}"/>
+    	<mkdir dir="${jar.temp.dir}"/>
+        <jar destfile="${jar.temp.dir}/temp_${ant.project.name}.jar" basedir="${bin.dir}">
+            <manifest>
+                <attribute name="Main-Class" value="${main-class}"/>
+            </manifest>
+        </jar>
+    	
+    	<copy todir="${jar.temp.dir}">
+    	    <fileset dir="${lib.dir}" includes="**/*.jar"/>
+    	</copy>
+    	
+    	<zip destfile="${jar.dir}/${ant.project.name}.jar">
+    		<zipgroupfileset dir="${jar.temp.dir}" includes="*.jar"/>
+    	</zip>
+    </target>
+	
+
+	<target name="run" depends="jar">
+		<java jar="${jar.dir}/${ant.project.name}.jar" fork="true"/>
+	</target>
+	
+	
+	
+	<target name="junit-compile">
+		<mkdir dir="${junit-bin.dir}"/>
+		
+		<copy todir="${junit-bin.temp.dir}">
+			<fileset dir="${src.dir}" includes="**/*"/>
+			<fileset dir="${junit-src.dir}" includes="**/*"/>
+		</copy>
+		
+		<javac target="1.6" source="1.6" srcdir="${junit-bin.temp.dir}" destdir="${junit-bin.dir}" 
+			includeantruntime="false" debug="true" debuglevel="lines,vars,source">
+			<compilerarg value="-Xlint"/>
+			<classpath>
+				<pathelement path="${classpath}"/>
+				<fileset dir="${lib.dir}">
+					<include name="**/*.jar"/>
+				</fileset>
+				<fileset dir="${junit-lib.dir}">
+					<include name="**/*.jar"/>
+				</fileset>
+				<pathelement location="${junit-bin.dir}"/>
+			</classpath>
+		</javac>
+	</target>
+	
+	
+	<target name="junit-only" depends="junit-compile">
+		<junit haltonfailure="off" printsummary="withOutAndErr">
+			<classpath>
+				<pathelement path="${classpath}"/>
+				<fileset dir="${lib.dir}">
+					<include name="**/*.jar"/>
+				</fileset>
+				<fileset dir="${junit-lib.dir}">
+					<include name="**/*.jar"/>
+				</fileset>
+				<pathelement location="${junit-bin.dir}"/>
+			</classpath>
+			
+			<formatter type="plain"/>
+	
+			<batchtest todir="${junit-reports.dir}">
+				<fileset dir="${junit-src.dir}">
+					<include name="**/*Test.java"/>
+				</fileset>
+			</batchtest>
+		</junit>
+	</target>
+	
+    <target name="main" depends="clean,jar"/>
+    <target name="junit" depends="jar, junit-only"/>
+</project>

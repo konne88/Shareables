@@ -4,6 +4,7 @@
 
 package org.shareables.server;
 
+import org.apache.commons.pool.impl.GenericObjectPool;
 import org.jboss.netty.channel.*;
 import org.jboss.netty.handler.codec.http.*;
 import org.jboss.netty.util.CharsetUtil;
@@ -12,7 +13,6 @@ import redis.clients.jedis.JedisPool;
 import redis.clients.jedis.Pipeline;
 
 import javax.script.ScriptEngine;
-import javax.script.ScriptEngineManager;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
@@ -38,22 +38,32 @@ import static org.jboss.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 public class MasterHandler extends SimpleChannelUpstreamHandler {
     private static Logger log = Logger.getLogger("org.shareable.server");
     private Responder responder;
-    private ScriptEngineManager manager;
     private ScriptEngine js;
-    private JedisPool pool;
+    private final GenericObjectPool<ScriptEngine> jsPool;
+    private final JedisPool jedisPool;
+    private Jedis jedi;
     /**
      * Constructs a new RequestHandler
      * @param pool
      */
-    public MasterHandler(JedisPool pool) {
-        this.pool = pool;
+    public MasterHandler(JedisPool pool, GenericObjectPool<ScriptEngine> scriptEnginePool) {
+        this.jedisPool = pool;
+        this.jsPool = scriptEnginePool;
     }
 
     @Override
     public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
         responder = new Responder(e.getChannel());
-	    manager = new ScriptEngineManager();
-	    js = manager.getEngineByExtension("js");
+        jedi = jedisPool.getResource();
+        js = jsPool.borrowObject();
+    }
+    
+    @Override
+    public void channelDisconnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
+        if(jedi != null)
+            jedisPool.returnResource(jedi);
+        if(js != null)
+            jsPool.returnObject(js);
     }
 
     /**
@@ -76,7 +86,7 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
         final String path = queryStringDecoder.getPath();
 
         log.info("Request for: " + path);
-        log.finer("Request: " + request.getContent().toString(CharsetUtil.UTF_8));
+        //log.finer("Request: " + request.getContent().toString(CharsetUtil.UTF_8));
         request.getContent().readerIndex(0);
 
         responder.setKeepAlive(isKeepAlive(request));
@@ -98,19 +108,16 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
                 log.info("model: " + model + ", lang: " + lang + ", key: " + key);
 
                 // create new object with the following id model and language
-                Jedis jedi = pool.getResource();
-                try {
-                    Pipeline pipe = jedi.pipelined();
-                    pipe.hset(key, "model", model);
-                    pipe.hset(key, "lang", lang);
-                    if ("mimeblob".equals(model)) {
-                        pipe.hset(key, "mime-type", mimetype);
-                    }
-                    pipe.hset(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII), data);
-                    pipe.sync();
-                } finally {
-                    pool.returnResource(jedi);
+
+                Pipeline pipe = jedi.pipelined();
+                pipe.hset(key, "model", model);
+                pipe.hset(key, "lang", lang);
+                if ("mimeblob".equals(model)) {
+                    pipe.hset(key, "mime-type", mimetype);
                 }
+                pipe.hset(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII), data);
+                pipe.sync();
+
 
                 // Write a response
                 responder.writeString(key, "application/x-shareable-key", HttpResponseStatus.OK);
@@ -129,25 +136,21 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
         } 
         else if(components[1].equals("get")){
         	// /get/$id
-            Jedis jedi = pool.getResource();
             String key = components[2];
             String contentType;
             String model;
             String lang;
             byte[] value;
-	        try {
-                List<String> meta = jedi.hmget(key, "model", "lang", "mime-type");
-                model = meta.get(0);
-                lang = meta.get(1);
-                if("mimeblob".equals(model)){
-                    contentType = meta.get(2);
-                } else {
-                    contentType = "application/json";
-                }
-	        	value = jedi.hget(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII)); // get js from db with this id
-	        } finally {
-                pool.returnResource(jedi);
+            List<String> meta = jedi.hmget(key, "model", "lang", "mime-type");
+            model = meta.get(0);
+            lang = meta.get(1);
+            if("mimeblob".equals(model)){
+                contentType = meta.get(2);
+            } else {
+                contentType = "application/json";
             }
+            value = jedi.hget(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII)); // get js from db with this id
+
             /*Object json = js.eval(objScript);
             responder.writeJSON(json, HttpResponseStatus.OK);*/
             responder.writeByteArray(value, contentType, HttpResponseStatus.OK);
@@ -207,6 +210,10 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
         if(!(e.getCause() instanceof IOException)){
             log.log(Level.WARNING, "Exception caught", e.getCause());
         }
+        if(jedi != null)
+            jedisPool.returnResource(jedi);
+        if (js != null)
+            jsPool.returnObject(js);
 
         e.getChannel().close();
     }

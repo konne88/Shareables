@@ -54,8 +54,6 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
     @Override
     public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
         responder = new Responder(e.getChannel());
-        jedi = jedisPool.getResource();
-        js = jsPool.borrowObject();
     }
     
     @Override
@@ -97,6 +95,12 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
             handlePreflights(request, channel);
             return;
         }
+        // get the pools here if they are null because we should not do
+        // long running operations in channelConnected()
+        if(jedi == null) 
+            jedi = jedisPool.getResource();
+        if(js == null)
+            js = jsPool.borrowObject();
 
         // Get the Requeststring e.g. /info
         final QueryStringDecoder queryStringDecoder = new QueryStringDecoder(request.getUri());

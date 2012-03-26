@@ -60,10 +60,28 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
     
     @Override
     public void channelDisconnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-        if(jedi != null)
+        if(jedi != null){
             jedisPool.returnResource(jedi);
-        if(js != null)
+            jedi = null;
+        }
+        if(js != null){
             jsPool.returnObject(js);
+            js = null;
+        }
+        super.channelDisconnected(ctx, e);
+    }
+
+    @Override
+    public void channelClosed(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
+        if (jedi != null) {
+            jedisPool.returnResource(jedi);
+            jedi = null;
+        }
+        if (js != null) {
+            jsPool.returnObject(js);
+            js = null;
+        }
+        super.channelClosed(ctx, e);
     }
 
     /**
@@ -210,10 +228,14 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
         if(!(e.getCause() instanceof IOException)){
             log.log(Level.WARNING, "Exception caught", e.getCause());
         }
-        if(jedi != null)
+        if (jedi != null) {
             jedisPool.returnResource(jedi);
-        if (js != null)
+            jedi = null;
+        }
+        if (js != null) {
             jsPool.returnObject(js);
+            js = null;
+        }
 
         e.getChannel().close();
     }

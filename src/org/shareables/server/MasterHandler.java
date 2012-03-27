@@ -166,16 +166,21 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
             List<String> meta = jedi.hmget(key, "model", "lang", "mime-type");
             model = meta.get(0);
             lang = meta.get(1);
-            if("mimeblob".equals(model)){
-                contentType = meta.get(2);
+            if(model != null && lang != null){
+                if("mimeblob".equals(model)){
+                    contentType = meta.get(2);
+                } else {
+                    contentType = "application/json";
+                }
+                value = jedi.hget(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII)); // get js from db with this id
+    
+                /*Object json = js.eval(objScript);
+                responder.writeJSON(json, HttpResponseStatus.OK);*/
+                responder.writeByteArray(value, contentType, HttpResponseStatus.OK);
             } else {
-                contentType = "application/json";
-            }
-            value = jedi.hget(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII)); // get js from db with this id
-
-            /*Object json = js.eval(objScript);
-            responder.writeJSON(json, HttpResponseStatus.OK);*/
-            responder.writeByteArray(value, contentType, HttpResponseStatus.OK);
+                log.info("Tried to access non existant key "+key);
+                responder.writeErrorMessage("ENOKEY", "They key is unknown to this system","", HttpResponseStatus.NOT_FOUND);
+            } 
         }
         else {
             // Unknown request, close connection

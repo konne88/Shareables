@@ -150,7 +150,7 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
                 if(success == 1){
                     model.newObject(request, key);
                     jedis.hset("meta:" + key, "last-updated", Long.toString(System.currentTimeMillis()));
-                    responder.writeString("shrbl://"+key, "application/x-shareable-key", HttpResponseStatus.OK);
+                    responder.writeString("{ \"shareable\" : \"shrbl://"+key+"\"}", "application/json", HttpResponseStatus.OK);
                 } else {
                     responder.writeErrorMessage("EBADNEW", "The key "+key+" already exists can't do new", "", HttpResponseStatus.BAD_REQUEST);
                 }
@@ -174,7 +174,7 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
             // Get model name
             String lastUpdated = jedis.hget("meta:" + key, "last-updated");
             if (lastUpdated != null) {
-                responder.writeString(lastUpdated, "application/x-shareable-timestamp", HttpResponseStatus.OK);
+                responder.writeString("{ \"last-updated\" : " + lastUpdated + "}", "application/json", HttpResponseStatus.OK);
             } else {
                 responder.writeErrorMessage("EBADLASTUPDATED", "Could not find " + key, "", HttpResponseStatus.NOT_FOUND);
             }

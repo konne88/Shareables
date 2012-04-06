@@ -5,6 +5,8 @@ package org.shareables.server;
 
 import org.apache.commons.pool.BasePoolableObjectFactory;
 import org.apache.commons.pool.impl.GenericObjectPool;
+import org.codehaus.jackson.JsonFactory;
+import org.shareables.models.ListModel;
 import org.shareables.models.MimeBlob;
 import org.shareables.models.ModelFactory;
 import org.shareables.models.ShareableModel;
@@ -51,6 +53,21 @@ public class Shareables {
                 return "mimeblob";
             }
         });
+
+        final JsonFactory factory = new JsonFactory();
+
+        registry.addModel(new ModelFactory() {
+            @Override
+            public ShareableModel createModel() {
+                return new ListModel(pool, factory);
+            }
+
+            @Override
+            public String getName() {
+                return "list";
+            }
+        });
+
 
         new HttpServer(pool, scriptEnginePool, registry);
     }

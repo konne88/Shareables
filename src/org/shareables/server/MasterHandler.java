@@ -100,7 +100,7 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
             String modelName = jedis.hget("meta:" + key, "model");
             ShareableModel model = registry.getModel(modelName);
             if (model != null) {
-                boolean  success = model.updateObject(request, key, path.substring(endOfKeyIndex));
+                boolean  success = model.updateObject(request, key, request.getUri().substring(endOfKeyIndex));
                 if (success){
                     jedis.hset("meta:"+key, "last-updated", Long.toString(System.currentTimeMillis()));
                     responder.writeStatusResponse(HttpResponseStatus.OK);
@@ -127,7 +127,7 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
             String modelName = jedis.hget("meta:"+key, "model");
             ShareableModel model = registry.getModel(modelName);
             if (model != null) {
-                model.useObject(request, key, path.substring(endOfKeyIndex), responder);
+                model.useObject(request, key, request.getUri().substring(endOfKeyIndex), responder);
             } else {
                 responder.writeErrorMessage("EBADUSE", "Could not find " + key, "", HttpResponseStatus.NOT_FOUND);
             }
@@ -150,7 +150,7 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
                 if(success == 1){
                     model.newObject(request, key);
                     jedis.hset("meta:" + key, "last-updated", Long.toString(System.currentTimeMillis()));
-                    responder.writeString(key, "application/x-shareable-key", HttpResponseStatus.OK);
+                    responder.writeString("shrbl://"+key, "application/x-shareable-key", HttpResponseStatus.OK);
                 } else {
                     responder.writeErrorMessage("EBADNEW", "The key "+key+" already exists can't do new", "", HttpResponseStatus.BAD_REQUEST);
                 }

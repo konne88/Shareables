@@ -198,6 +198,7 @@ public class Responder {
      * If the byte array is null this method will sent an empty response content.
      * @param byteArray A json object as byte array
      * @param status HttpResponseStatus
+     * @param contentType the content-type to set, if "unknown" no content-type is set
      * @throws IOException Thrown if writing onto the output fails
      */
     public void writeByteArray(byte[] byteArray, String contentType,HttpResponseStatus status) throws IOException {
@@ -211,7 +212,9 @@ public class Responder {
         HttpResponse response = new DefaultHttpResponse(HTTP_1_1, status);
 
         response.setHeader("Access-Control-Allow-Origin", "*");
-        response.setHeader(CONTENT_TYPE, contentType);
+        if(!contentType.equals("unknown"))
+            response.setHeader(CONTENT_TYPE, contentType);
+
         outputBuffer.clear();
 
         if (byteArray != null) {
@@ -240,7 +243,7 @@ public class Responder {
         /**
          * Writes a given String onto the wire as UTF-8
         *using the specified content-type
-        *@param byteArray A json object as byte array
+        *@param data a string to write to the wire
         *@param status HttpResponseStatus
         *@param contentType the content-type to use
         *@throws IOException Thrown if writing onto the output fails

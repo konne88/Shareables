@@ -28,7 +28,7 @@ import java.util.concurrent.Executors;
  */
 public class HttpServer {
 
-    public HttpServer(JedisPool pool, GenericObjectPool<ScriptEngine> jsPool) {
+    public HttpServer(JedisPool pool, GenericObjectPool<ScriptEngine> jsPool, ModelRegistry registry) {
         // Configure the server.
 
 		ServerBootstrap bootstrap = new ServerBootstrap(
@@ -38,7 +38,7 @@ public class HttpServer {
 								.newCachedThreadPool()));
 
 			// Set up the event pipeline factory without ssl
-			bootstrap.setPipelineFactory(new ServerPipelineFactory(pool, jsPool));
+			bootstrap.setPipelineFactory(new ServerPipelineFactory(pool, jsPool, registry));
 			// Bind and start to accept incoming connections.
 			bootstrap.bind(new InetSocketAddress(8080));
 	}

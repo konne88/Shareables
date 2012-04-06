@@ -5,6 +5,9 @@ package org.shareables.server;
 
 import org.apache.commons.pool.BasePoolableObjectFactory;
 import org.apache.commons.pool.impl.GenericObjectPool;
+import org.shareables.models.MimeBlob;
+import org.shareables.models.ModelFactory;
+import org.shareables.models.ShareableModel;
 import redis.clients.jedis.JedisPool;
 
 import javax.script.ScriptEngine;
@@ -25,7 +28,7 @@ public class Shareables {
         config.whenExhaustedAction = GenericObjectPool.WHEN_EXHAUSTED_GROW;
         config.maxIdle = 32;
         config.maxActive = 48;
-        JedisPool pool = new JedisPool(config, "localhost");
+        final JedisPool pool = new JedisPool(config, "localhost");
         final ScriptEngineManager manager = new ScriptEngineManager();
 
         GenericObjectPool<ScriptEngine> scriptEnginePool = new GenericObjectPool<ScriptEngine>(new BasePoolableObjectFactory<ScriptEngine>() {
@@ -35,6 +38,20 @@ public class Shareables {
             }
         });
         scriptEnginePool.setConfig(config);
-        new HttpServer(pool, scriptEnginePool);
+        ModelRegistry registry = new ModelRegistry();
+
+        registry.addModel(new ModelFactory() {
+            @Override
+            public ShareableModel createModel() {
+                return new MimeBlob(pool);
+            }
+
+            @Override
+            public String getName() {
+                return "mimeblob";
+            }
+        });
+
+        new HttpServer(pool, scriptEnginePool, registry);
     }
 }

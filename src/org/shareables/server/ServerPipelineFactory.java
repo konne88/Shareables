@@ -30,10 +30,12 @@ public class ServerPipelineFactory implements ChannelPipelineFactory {
 
     private final JedisPool jedisPool;
     private final GenericObjectPool<ScriptEngine> scriptEnginePool;
+    private final ModelRegistry registry;
 
-    public ServerPipelineFactory(JedisPool pool, GenericObjectPool<ScriptEngine> jsPool) {
+    public ServerPipelineFactory(JedisPool pool, GenericObjectPool<ScriptEngine> jsPool, ModelRegistry registry) {
         this.jedisPool = pool;
-        scriptEnginePool = jsPool;
+        this.scriptEnginePool = jsPool;
+        this.registry = registry;
     }
 
     @Override
@@ -50,14 +52,15 @@ public class ServerPipelineFactory implements ChannelPipelineFactory {
         }*/
 
         pipeline.addLast("decoder", new HttpRequestDecoder());
-        // TODO Might change to handling HttpChunks on our own here we have 10
+        // TODO
+        // Might change to handling HttpChunks on our own here we have 10
         // MB request size limit
         pipeline.addLast("aggregator", new HttpChunkAggregator(10485760));
         pipeline.addLast("encoder", new HttpResponseEncoder());
         // We could add compression support by uncommenting the following line
         pipeline.addLast("deflater", new HttpContentCompressor());
 
-        pipeline.addLast("handler", new MasterHandler(jedisPool, scriptEnginePool));
+        pipeline.addLast("handler", new MasterHandler(jedisPool, registry));
         return pipeline;
     }
 }

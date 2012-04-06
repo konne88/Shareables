@@ -4,18 +4,14 @@
 
 package org.shareables.server;
 
-import org.apache.commons.pool.impl.GenericObjectPool;
 import org.jboss.netty.channel.*;
 import org.jboss.netty.handler.codec.http.*;
-import org.jboss.netty.util.CharsetUtil;
+import org.shareables.models.ShareableModel;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
-import redis.clients.jedis.Pipeline;
 
-import javax.script.ScriptEngine;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.List;
 import java.util.UUID;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -38,49 +34,22 @@ import static org.jboss.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 public class MasterHandler extends SimpleChannelUpstreamHandler {
     private static Logger log = Logger.getLogger("org.shareable.server");
     private Responder responder;
-    private ScriptEngine js;
-    private final GenericObjectPool<ScriptEngine> jsPool;
     private final JedisPool jedisPool;
-    private Jedis jedi;
+    private final ModelRegistry registry;
     /**
      * Constructs a new RequestHandler
      * @param pool
      */
-    public MasterHandler(JedisPool pool, GenericObjectPool<ScriptEngine> scriptEnginePool) {
+    public MasterHandler(JedisPool pool, ModelRegistry registry) {
         this.jedisPool = pool;
-        this.jsPool = scriptEnginePool;
+        this.registry = registry;
     }
 
     @Override
     public void channelConnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
         responder = new Responder(e.getChannel());
     }
-    
-    @Override
-    public void channelDisconnected(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-        if(jedi != null){
-            jedisPool.returnResource(jedi);
-            jedi = null;
-        }
-        if(js != null){
-            jsPool.returnObject(js);
-            js = null;
-        }
-        super.channelDisconnected(ctx, e);
-    }
 
-    @Override
-    public void channelClosed(ChannelHandlerContext ctx, ChannelStateEvent e) throws Exception {
-        if (jedi != null) {
-            jedisPool.returnResource(jedi);
-            jedi = null;
-        }
-        if (js != null) {
-            jsPool.returnObject(js);
-            js = null;
-        }
-        super.channelClosed(ctx, e);
-    }
 
     /**
      * Called when a message is received
@@ -95,97 +64,123 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
             handlePreflights(request, channel);
             return;
         }
-        // get the pools here if they are null because we should not do
-        // long running operations in channelConnected()
-        if(jedi == null) 
-            jedi = jedisPool.getResource();
-        if(js == null)
-            js = jsPool.borrowObject();
 
         // Get the Requeststring e.g. /info
         final QueryStringDecoder queryStringDecoder = new QueryStringDecoder(request.getUri());
-
         final String path = queryStringDecoder.getPath();
 
         log.info("Request for: " + path);
         //log.finer("Request: " + request.getContent().toString(CharsetUtil.UTF_8));
         request.getContent().readerIndex(0);
-
         responder.setKeepAlive(isKeepAlive(request));
 
-        String[] components = path.split("/");
-        
-        if (components[1].equals("new") && request.getMethod().equals(HttpMethod.POST)) {
-        	// /new/$model/$lang
-            if(components.length >= 4){
-                String model = components[2];
-                String lang = components[3];
+        if (path.startsWith("/new/")){
+            handleNew(request, path);
+        } else if (path.startsWith("/use/")){
+            handleUse(request, path);
+        } else if (path.startsWith("/update/")){
+            handleUpdate(request, path);
+        } else if (path.startsWith("/lastupdated/")){
+            handleLastUpdated(request, path);
+        } else {
+            responder.writeErrorMessage("EUNKNONURL", "The url "+path+" is unknown", "", HttpResponseStatus.OK);
+        }
 
-                byte[] data = request.getContent().toByteBuffer().array();
+    }
 
-                String mimetype = request.getHeader("Content-Type");
-                // Add language execution here
+    private void handleUpdate(HttpRequest request, String path) throws Exception {
+        final int endOfUseIndex = "/update/".length();
+        final int slashIndex = path.indexOf('/', endOfUseIndex + 1);
+        final int endOfKeyIndex = (slashIndex > 0) ? slashIndex : path.length();
 
-                String key = model+":"+UUID.randomUUID().toString();
-                log.info("model: " + model + ", lang: " + lang + ", key: " + key);
-
-                // create new object with the following id model and language
-
-                Pipeline pipe = jedi.pipelined();
-                pipe.hset(key, "model", model);
-                pipe.hset(key, "lang", lang);
-                if ("mimeblob".equals(model)) {
-                    pipe.hset(key, "mime-type", mimetype);
+        String key = path.substring(endOfUseIndex, endOfKeyIndex);
+        Jedis jedis = jedisPool.getResource();
+        try {
+            // Get model name
+            String modelName = jedis.hget("meta:" + key, "model");
+            ShareableModel model = registry.getModel(modelName);
+            if (model != null) {
+                boolean  success = model.updateObject(request, key, path.substring(endOfKeyIndex));
+                if (success){
+                    jedis.hset("meta:"+key, "last-updated", Long.toString(System.currentTimeMillis()));
+                    responder.writeStatusResponse(HttpResponseStatus.OK);
+                } else {
+                    responder.writeErrorMessage("EBADUPDATE", "Could not update, might be concurrent access", "", HttpResponseStatus.BAD_REQUEST);
                 }
-                pipe.hset(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII), data);
-                pipe.sync();
-
-
-                // Write a response
-                responder.writeString(key, "application/x-shareable-key", HttpResponseStatus.OK);
             } else {
-                responder.writeErrorMessage("EBADNEW", "New neeeds to be /new/$model/$lang","", HttpResponseStatus.BAD_REQUEST);
+                responder.writeErrorMessage("EBAUPDATE", "Could not find " + key, "", HttpResponseStatus.NOT_FOUND);
+            }
+        } finally {
+            jedisPool.returnResource(jedis);
+        }
+    }
+
+    private void handleUse(HttpRequest request, String path) throws Exception {
+        final int endOfUseIndex = "/use/".length();
+        final int slashIndex = path.indexOf('/', endOfUseIndex + 1);
+        final int endOfKeyIndex = (slashIndex > 0)?slashIndex:path.length();
+
+        String key = path.substring(endOfUseIndex, endOfKeyIndex);
+        Jedis jedis = jedisPool.getResource();
+        try {
+            // Get model name
+            String modelName = jedis.hget("meta:"+key, "model");
+            ShareableModel model = registry.getModel(modelName);
+            if (model != null) {
+                model.useObject(request, key, path.substring(endOfKeyIndex), responder);
+            } else {
+                responder.writeErrorMessage("EBADUSE", "Could not find " + key, "", HttpResponseStatus.NOT_FOUND);
             }
 
-
-
-
+        } finally {
+            jedisPool.returnResource(jedis);
         }
-        else if(components[1].equals("update")){
-        	// /update/$id
-        	String id = components[2];
-        	// store script in object with this id
-        } 
-        else if(components[1].equals("get")){
-        	// /get/$id
-            String key = components[2];
-            String contentType;
-            String model;
-            String lang;
-            byte[] value;
-            List<String> meta = jedi.hmget(key, "model", "lang", "mime-type");
-            model = meta.get(0);
-            lang = meta.get(1);
-            if(model != null && lang != null){
-                if("mimeblob".equals(model)){
-                    contentType = meta.get(2);
+    }
+
+    private void handleNew(HttpRequest request, String path) throws Exception {
+        final int endOfNewIndex = "/new/".length();
+        String modelName = path.substring(endOfNewIndex);
+        ShareableModel model = registry.getModel(modelName);
+        if(model != null){
+            String key = UUID.randomUUID().toString();
+            Jedis jedis = jedisPool.getResource();
+            try {
+                // Check if key existis
+                long success = jedis.hsetnx("meta:" + key, "model", modelName);
+                if(success == 1){
+                    model.newObject(request, key);
+                    jedis.hset("meta:" + key, "last-updated", Long.toString(System.currentTimeMillis()));
+                    responder.writeString(key, "application/x-shareable-key", HttpResponseStatus.OK);
                 } else {
-                    contentType = "application/json";
+                    responder.writeErrorMessage("EBADNEW", "The key "+key+" already exists can't do new", "", HttpResponseStatus.BAD_REQUEST);
                 }
-                value = jedi.hget(key.getBytes(CharsetUtil.US_ASCII), "value".getBytes(CharsetUtil.US_ASCII)); // get js from db with this id
-    
-                /*Object json = js.eval(objScript);
-                responder.writeJSON(json, HttpResponseStatus.OK);*/
-                responder.writeByteArray(value, contentType, HttpResponseStatus.OK);
-            } else {
-                log.info("Tried to access non existant key "+key);
-                responder.writeErrorMessage("ENOKEY", "They key is unknown to this system","", HttpResponseStatus.NOT_FOUND);
-            } 
+            } finally {
+                jedisPool.returnResource(jedis);
+            }
+
+        } else {
+            responder.writeErrorMessage("EUNKNOWNMODEL", "The model "+modelName+" is unknown to this server", "", HttpResponseStatus.NOT_FOUND);
         }
-        else {
-            // Unknown request, close connection
-            log.warning("An unknown URL was requested: " + path);
-            responder.writeErrorMessage("EUNKNOWNURL", "An unknown URL was requested", "unknown URL: " + path, HttpResponseStatus.NOT_FOUND);
+    }
+
+    private void handleLastUpdated(HttpRequest request, String path) throws IOException {
+        final int endOfLastUpdated = "/lastupdated/".length();
+        final int slashIndex = path.indexOf('/', endOfLastUpdated + 1);
+        final int endOfKeyIndex = (slashIndex > 0) ? slashIndex : path.length();
+
+        String key = path.substring(endOfLastUpdated, endOfKeyIndex);
+        Jedis jedis = jedisPool.getResource();
+        try {
+            // Get model name
+            String lastUpdated = jedis.hget("meta:" + key, "last-updated");
+            if (lastUpdated != null) {
+                responder.writeString(lastUpdated, "application/x-shareable-timestamp", HttpResponseStatus.OK);
+            } else {
+                responder.writeErrorMessage("EBADLASTUPDATED", "Could not find " + key, "", HttpResponseStatus.NOT_FOUND);
+            }
+
+        } finally {
+            jedisPool.returnResource(jedis);
         }
     }
 
@@ -237,15 +232,6 @@ public class MasterHandler extends SimpleChannelUpstreamHandler {
         if(!(e.getCause() instanceof IOException)){
             log.log(Level.WARNING, "Exception caught", e.getCause());
         }
-        if (jedi != null) {
-            jedisPool.returnResource(jedi);
-            jedi = null;
-        }
-        if (js != null) {
-            jsPool.returnObject(js);
-            js = null;
-        }
-
         e.getChannel().close();
     }
 }
